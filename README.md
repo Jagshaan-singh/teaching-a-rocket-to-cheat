@@ -1,89 +1,67 @@
-# 🚀 Teaching a Rocket to Cheat
+Teaching a Rocket to Cheat
 
-**What happens when a reinforcement learning agent optimizes the reward instead of the goal?**
+I trained an AI to land a rocket, then gave it a badly designed reward and watched it stop landing.
 
-An experiment in **reward hacking** using PPO, Gymnasium's Lunar Lander, and custom reward functions. I deliberately introduced a flawed reward that incentivized hovering, observed the resulting behavior, and modified the reward to reduce the incentive.
+With the flawed reward, the agent's training score went up (162 → 640) while its real landing score fell from 219.8 to -77.5. It had learned to hover and collect points instead of landing. After I fixed the reward, it recovered and landed again in 2 of 3 runs.
 
-### 🔥 Key Results
+The point: a reward can go up while the agent gets worse at the actual job. Always check the behavior, not just the score.
 
-- **640 training reward:** The hacked agent's reward increased from 162 to 640.
-- **-77.5 evaluation score:** The same seed's performance on the original game fell from 219.8 for the baseline to -77.5.
-- **270.9 best fixed run:** The corrected reward reached the environment's solved threshold in 2 of 3 seeds.
+What I did
 
-Across 10 runs, I used a total training budget of **10 million environment timesteps**, running entirely on a CPU laptop without a GPU.
+I used Gymnasium's LunarLander-v3 and trained PPO (Stable-Baselines3, default MlpPolicy) for 1M steps per run, on a laptop CPU. On top of the game's built-in reward I wrote small reward wrappers and compared four setups:
 
-### 🎬 Watch the Experiments
+Setup	Reward change	Why
+Baseline	None	Reference
+Time penalty	-0.02 per frame	Nudge toward faster landings
+Hover hack	+1 per frame while upright and slow	Break it on purpose
+Fixed	+1 only for entering the upright-and-slow state, plus -0.02 per frame	Remove the reason to hover
 
-All 12 recorded clips are available in [`videos/`](videos/).
+The hack works because the bonus is paid every frame. Landing ends the episode and the bonus stops, so hovering for up to 1,000 frames pays more than landing. The fix pays once for getting into the good state, so sitting there earns nothing extra.
 
-| Experiment | Videos |
-|---|---|
-| Baseline | [Seed 0](videos/baseline-episode-0.mp4) · [Seed 1](videos/baseline-episode-1.mp4) · [Seed 2](videos/baseline-episode-2.mp4) |
-| Hover hack | [Seed 0](videos/hover_hack-episode-0.mp4) · [Seed 1](videos/hover_hack-episode-1.mp4) · [Seed 2](videos/hover_hack-episode-2.mp4) |
-| Fixed reward | [Seed 0](videos/fixed-episode-0.mp4) · [Seed 1](videos/fixed-episode-1.mp4) · [Seed 2](videos/fixed-episode-2.mp4) |
-| Time penalty | [Seed 0](videos/time_penalty-episode-0.mp4) · [Seed 1](videos/time_penalty-episode-1.mp4) · [Seed 2](videos/time_penalty-episode-2.mp4) |
+Results
 
-### 🧪 Reward Design and Results
+Every score below was measured on the original game with my wrappers turned off, over 20 deterministic episodes. 200 or more counts as solved. The ± is variation across those 20 episodes, not across seeds.
 
-All evaluation results use the original Lunar Lander environment, with custom reward wrappers disabled. Each evaluation used 20 deterministic episodes. A mean score of 200 or above counts as solved.
+Setup	Seed 0	Seed 1	Seed 2	Mean
+Baseline	219.8 ± 12.8	not run	not run	219.8
+Time penalty	133.3 ± 128.1	271.0 ± 26.0	113.0 ± 114.2	172.4
+Hover hack	-77.5 ± 27.6	114.2 ± 95.9	86.7 ± 82.1	41.1
+Fixed	270.9 ± 30.3	158.8 ± 42.8	202.3 ± 61.9	210.7
+Hover hack: never reached 200 in any seed. Seed 0 is the clear case: the clip shows it hovering instead of landing.
+Fixed: solved in 2 of 3 seeds, and its mean is close to the baseline's.
+Time penalty vs fixed: the time-penalty runs vary a lot between seeds, so I can't say which is better.
+Be careful with these numbers
+The baseline has one seed, the others have three. 10 runs in total (10M steps combined).
+The hack was dramatic in seed 0 but milder in seeds 1 and 2.
+The fix did not beat the baseline. It brought performance back after the hack.
+Models are the final checkpoint, not the best one.
 
-| Variant | Seed 0 | Seed 1 | Seed 2 | Mean |
-|---|---:|---:|---:|---:|
-| Baseline | 219.8 ± 12.8 | — | — | 219.8* |
-| Time penalty | 133.3 ± 128.1 | 271.0 ± 26.0 | 113.0 ± 114.2 | 172.4 |
-| Hover hack | -77.5 ± 27.6 | 114.2 ± 95.9 | 86.7 ± 82.1 | 41.1 |
-| Fixed reward | 270.9 ± 30.3 | 158.8 ± 42.8 | 202.3 ± 61.9 | 210.7 |
+This shows reward hacking in one small environment. It doesn't prove anything general.
 
-*Baseline uses one seed; each modified variant uses three. The ± values represent variation across evaluation episodes.*
+Videos
 
-### 🧠 How It Works
+12 clips in videos/, three per setup. If you only watch two, watch the baseline and the hover hack (seed 0).
 
-**Stack:** Python · Gymnasium · Box2D · Stable-Baselines3 PPO · PyTorch
+Run it
+bash
+python -m venv venv
+venv\Scripts\activate            # Mac/Linux: source venv/bin/activate
+pip install swig
+pip install "gymnasium[box2d]" stable-baselines3 moviepy
 
-The PPO agent uses `MlpPolicy`, a multilayer perceptron neural network, to learn a policy from the lander's observations and rewards.
+Run everything from the project root, so models/ and videos/ land in one place.
 
-Four reward configurations were tested:
+bash
+python 02_train_baseline.py
+python 05_train_shaped.py hover_hack 0     # also: time_penalty, fixed
+python 03_evaluate.py models/hover_hack_s0
+python 04_record.py models/hover_hack_s0 hover_hack
 
-- **Baseline:** Original environment reward.
-- **Time penalty:** `-0.02` per frame to encourage shorter episodes.
-- **Hover hack:** `+1` per frame while upright (`|tilt| < 0.2`) and slow (`speed < 0.3`). This unintentionally rewards hovering instead of landing.
-- **Fixed reward:** Rewards the change into the upright-and-slow state rather than repeatedly rewarding remaining there, while retaining the time penalty.
+01_random_agent.py just shows a random rocket crashing. Reward wrappers live in wrappers.py.
 
-The key finding: a high reward under a modified objective does not necessarily mean the agent has learned the intended task.
+What I took from it
+Look at the agent, not only the reward curve.
+Evaluate on the original objective, with your own bonuses off.
+Run more than one seed before you believe a result.
 
-### 📁 Code
-
-- [`01_random_agent.py`](01_random_agent.py) — Random-agent demonstration
-- [`02_train_baseline.py`](02_train_baseline.py) — Baseline PPO training
-- [`03_evaluate.py`](03_evaluate.py) — Evaluation
-- [`04_record.py`](04_record.py) — Video recording
-- [`05_train_shaped.py`](05_train_shaped.py) — Modified reward experiments
-- [`wrappers.py`](wrappers.py) — Custom reward functions
-
-### ▶️ Run Locally
-
-```bash
-git clone https://github.com/YOUR-USERNAME/teaching-a-rocket-to-cheat.git
-cd teaching-a-rocket-to-cheat
-
-python -m venv .venv
-.venv\Scripts\activate
-
-pip install "gymnasium[box2d]" stable-baselines3 torch
-```
-
-Run the scripts in the order appropriate to your implementation. Training uses 1 million environment timesteps per run and took approximately 13 minutes per run on the experimental hardware.
-
-### 💡 Takeaways
-
-1. Reward is not the same as success.
-2. Visual inspection can reveal behavior that a reward curve hides.
-3. Evaluating on the original objective helps expose reward exploitation.
-
-### ⚠️ Limitations
-
-Three seeds per modified variant, one baseline seed, and end-of-training checkpoints limit the strength of the conclusions. The time-penalty versus fixed-reward comparison is inconclusive given seed variability. This is a small demonstration, not a universal solution to reward hacking.
-
----
-
-**The goal wasn't to build a rocket that cheats. It was to understand why an AI might.**
+The agent optimizes the reward it is given. Writing a reward that means what you want is the hard part.
